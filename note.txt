@@ -1,0 +1,170 @@
+## Étape1 : Lancement Nats en local 
+
+Lanceer NATS JetStream (docker)
+
+doccker run -d --name nats -p 4222:4222 -p 8222:8222 nats:latest -js
+
+Explication:
+-> -d : en arrière-plan
+-> -p 4222 : port pour les clients GO
+-> -js : active JetStream(comme Kafka mais léger)
+
+Vérifier que le ça tourne : 
+docker ps
+
+## Étape2 : Créer le projet Go
+
+mkdir go-nats-poc
+cd go-nats-poc
+go mod init github.com/Nairod97425/go-nats-poc
+
+## Étapes3 : installer le client NATS pour GO
+
+go get github.com/nats-io/nats.go
+-> Télécharge la librairie officielle NATS en GO
+
+## Étape4 : Créer le publisher(qui émet l'événement)
+
+Créer un fichier : publisher.go
+
+package main
+
+import (
+	"fmt"
+	"github.com/nats-io/nats.go"
+	"time"
+)
+
+func main() {
+	// 1. Se connecter à NATS
+	nc, err := nats.Connect("nats://localhost:4222")
+	if err != nil {
+		panic(err)
+	}
+	defer nc.Close()
+
+	// 2. Activer JetStream
+	js, err := nc.JetStream()
+	if err != nil {
+		panic(err)
+	}
+
+	// 3. Publier un événement toutes les 3 secondes
+	for i := 1; i <= 5; i++ {
+		user := fmt.Sprintf("user%d@example.com", i)
+		msg := []byte(fmt.Sprintf(`{"action":"registered","email":"%s"}`, user))
+
+		// Publie sur le sujet "events.user.registered"
+		js.Publish("events.user.registered", msg)
+		fmt.Printf("Envoyé : %s\n", msg)
+
+		time.Sleep(3 * time.Second)
+	}
+
+	fmt.Println("Publisher terminé.")
+}
+
+Explication ligne par ligne :*
+
+nats.Connect(...) -> Se connecte au Nats local
+JetStream() -> Active le mode persistent(Kafka)
+js.Publish("events.usser.registered", ...) -> Envoie un événement sur un sujeet(comme un canal)
+[]byte(...)NATS transporte du binaire -> on convertit JSON en bytes
+
+
+ÉTAPE 5 : Créer le subscriber (qui écoute)
+
+Créer un fichier : subscriber.go
+
+package main
+
+import (
+	"fmt"
+	"github.com/nats-io/nats.go"
+)
+
+func main() {
+	// 1. Connexion
+	nc, err := nats.Connect("nats://localhost:4222")
+	if err != nil {
+		panic(err)
+	}
+	defer nc.Close()
+
+	// 2. JetStream
+	js, err := nc.JetStream()
+	if err != nil {
+		panic(err)
+	}
+
+	// 3. S'abonner au sujet
+	sub, err := js.Subscribe("events.user.registered", func(m *nats.Msg) {
+		fmt.Printf("Reçu : %s\n", string(m.Data))
+		// Ici : on pourrait envoyer un WhatsApp !
+		m.Ack() // Confirme qu'on a traité
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer sub.Unsubscribe()
+
+	fmt.Println("Subscriber en écoute... (Ctrl+C pour arrêter)")
+	select {} // Bloque indéfiniment
+}
+
+Explication :
+
+Subscribe → écoute en continu
+func(m *nats.Msg) → callback à chaque message
+m.Ack() → dit "j’ai bien traité" (comme Kafka offset)
+
+## Étape6 : Tester en local
+
+Ouvre 2 terminaux : 
+-> Terminal 1 (subcriber)
+
+go run subscriber.go
+-> Affiche : Subscriber en écoute...
+
+Terminal 2 (publisher) :
+go run publisher.go
+
+-> on dois voir : 
+Envoyé : {"action":"registered","email":"user1@example.com"}
+...
+
+Et dans le Terminal 1 :
+Reçu : {"action":"registered","email":"user1@example.com"}
+
+## Étape7 : Initialiser Git + Push sur GitHub
+
+git init
+git add .
+git commit -m "PoC event-driven avec NATS et Go"
+git branch -M main
+git remote add origin https://github.com/Nairod97425/go-nats-poc.git
+git push -u origin main
+
+## Étape 8 : Ajouter un README.md pro
+
+Crée README.md :
+# PoC Event-Driven avec Go + NATS
+
+## Objectif
+Simuler un flux d'événements :  
+`user.registered` → notification (console, extensible à WhatsApp)
+
+## Stack
+- Go
+- NATS JetStream (via Docker)
+- Event-driven architecture
+
+## Lancer
+```bash
+docker run -d --name nats -p 4222:4222 nats:latest -js
+
+Subscriber
+go run subscriber.go
+
+Publisher
+go run publisher.go
